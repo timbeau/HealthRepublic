@@ -1,0 +1,60 @@
+// src/App.tsx
+inport React from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import LoginPage from "./pages/LoginPage";
+import DashboardRouter from "./pages/DashboardRouter";
+import RegisterPage from "./pages/RegisterPage";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
+import NavBar from "./components/NavBar";
+
+function AppRoutes() {
+  const { accessToken, isLoadingProfile } = useAuth();
+
+  if (isLoadingProfile) {
+    return <div>Loading profile…</div>;
+  }
+
+  return (
+    <Routes>
+      {/* Public routes */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+
+      {/* Protected application root */}
+      <Route
+        path="/"
+        element={
+          accessToken ? <DashboardRouter /> : <Navigate to="/login" replace />
+        }
+      />
+
+      {/* Catch-all redirect */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
+  );
+}
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <NavBar />     {/* <-- add this */}
+
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/dashboard/*" element={<DashboardRouter />} />
+
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}
