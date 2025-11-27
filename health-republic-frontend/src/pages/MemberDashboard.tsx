@@ -1,11 +1,12 @@
 // src/pages/MemberDashboard.tsx
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import type { Negotiation } from "../api/client";
 import { fetchMemberNegotiations } from "../api/client";
 
 export default function MemberDashboard() {
-  const { user, accessToken, logout } = useAuth();
+  const { user, accessToken, logout, collective } = useAuth();
 
   const [negotiations, setNegotiations] = useState<Negotiation[]>([]);
   const [stats, setStats] = useState({ total: 0, open: 0, agreed: 0 });
@@ -40,7 +41,22 @@ export default function MemberDashboard() {
       .catch((err: any) => {
         if (cancelled) return;
         console.error("Failed to load negotiations", err);
-        setError(err.message || "Failed to load negotiations");
+
+        // Try to unwrap a JSON error message like {"detail":"Insufficient permissions"}
+        if (typeof err.message === "string") {
+          try {
+            const parsed = JSON.parse(err.message);
+            if (parsed && parsed.detail) {
+              setError(parsed.detail);
+            } else {
+              setError(err.message);
+            }
+          } catch {
+            setError(err.message || "Failed to load negotiations");
+          }
+        } else {
+          setError("Failed to load negotiations");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -96,11 +112,55 @@ export default function MemberDashboard() {
           </p>
         </section>
 
+        {/* Collective summary + change link */}
+        <section>
+          <h2 className="text-sm font-semibold mb-2 text-slate-700">
+            Your collective
+          </h2>
+
+          {collective ? (
+            <div className="bg-white rounded-2xl shadow p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold">{collective.name}</p>
+                {collective.category && (
+                  <p className="text-xs text-slate-500">
+                    Category: {collective.category}
+                  </p>
+                )}
+              </div>
+              <Link
+                to="/dashboard/collectives"
+                className="text-xs px-3 py-1 rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
+              >
+                Change collective
+              </Link>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl shadow p-4 flex items-center justify-between">
+              <p className="text-sm text-slate-600">
+                You are not part of a collective yet.
+              </p>
+              <Link
+                to="/dashboard/collectives"
+                className="text-xs px-3 py-1 rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
+              >
+                Join a collective
+              </Link>
+            </div>
+          )}
+        </section>
+
         {/* Stats cards */}
         <section>
           <h2 className="text-sm font-semibold mb-2 text-slate-700">
             Your negotiations
           </h2>
+          {error === "Insufficient permissions" && (
+            <p className="text-xs text-slate-500 mb-2">
+              Negotiation details are only available once you are part of a
+              collective.
+            </p>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white rounded-2xl shadow p-4">
               <div className="text-xs text-slate-500">Total negotiations</div>
@@ -145,7 +205,7 @@ export default function MemberDashboard() {
             </p>
           )}
 
-          {!loading && negotiations.length > 0 && (
+          {!loading && !error && negotiations.length > 0 && (
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs border border-slate-200">
                 <thead className="bg-slate-50">

@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from . import schemas
 from .enums import AgeRangeEnum, IndustryEnum, RoleEnum, UserTypeEnum
-from . import models as user_models
+from . import models                      # for models.User
+from . import models as user_models       # existing alias used elsewhere
 from ..auth.utils import hash_password
 from ..auth.deps import require_roles
 
@@ -20,7 +21,9 @@ def get_lookups():
     """
     Returns all lookup values for user registration.
     Public endpoint (no auth).
-    Admin role is deliberately *excluded* from the roles list for self-service signup.
+
+    Admin role is deliberately *excluded* from the roles list
+    for self-service signup.
     """
     return schemas.LookupsResponse(
         age_ranges=[a.value for a in AgeRangeEnum],
@@ -32,7 +35,11 @@ def get_lookups():
 
 # ---------- Public registration (locked to member/consumer) ----------
 
-@router.post("/register", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=schemas.UserOut,
+    status_code=status.HTTP_201_CREATED,
+)
 def register_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
     """
     Public registration endpoint.
@@ -74,7 +81,9 @@ def register_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
 
     return user
 
-# PUBLIC registration: supplier / provider / insurer (no admin)
+
+# ---------- Public registration: supplier / provider / insurer (no admin) ----------
+
 @router.post(
     "/register-supplier",
     response_model=schemas.UserOut,
@@ -85,32 +94,35 @@ def register_supplier(user_in: schemas.UserCreate, db: Session = Depends(get_db)
     Public registration for suppliers / providers / insurers.
 
     - Forces role = supplier
-    - Restricts user_type to supplier-oriented values
     - Never allows admin
+    - Uses whatever valid user_type the client sends (as defined in UserTypeEnum),
+      or falls back to a default enum value if missing.
     """
 
     # Ensure email unique
-    existing = db.query(models.User).filter(models.User.email == user_in.email).first()
+    existing = (
+        db.query(models.User)
+        .filter(models.User.email == user_in.email)
+        .first()
+    )
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
         )
 
-    # Force supplier role
-    role = RoleEnum.supplier
+    # Force supplier role (use .value so we store the same kind of string
+    # as in register_user).
+    role_value = RoleEnum.supplier.value
 
-    # Only allow certain user_types for public supplier signup.
-    # Adjust these to match your actual UserTypeEnum values.
-    allowed_supplier_types = {
-        UserTypeEnum.provider,
-        UserTypeEnum.insurer,   # or carrier, payer, etc – use your real enum names
-    }
-
-    user_type = user_in.user_type
-    if user_type not in allowed_supplier_types:
-        # Default to provider if they send something else
-        user_type = UserTypeEnum.provider
+    # user_type has already been validated against UserTypeEnum by Pydantic.
+    # If the client did not send one, or sent something invalid, we fall back.
+    if isinstance(user_in.user_type, UserTypeEnum):
+        user_type_value = user_in.user_type.value
+    else:
+        # Fallback: first enum value (you can change this to a specific one
+        # once you decide which user_type best fits suppliers by default).
+        user_type_value = list(UserTypeEnum)[0].value
 
     db_user = models.User(
         email=user_in.email,
@@ -119,8 +131,8 @@ def register_supplier(user_in: schemas.UserCreate, db: Session = Depends(get_db)
         age_range=user_in.age_range,
         industry=user_in.industry,
         household_size=user_in.household_size,
-        role=role,
-        user_type=user_type,
+        role=role_value,
+        user_type=user_type_value,
         hashed_password=hash_password(user_in.password),
     )
 
@@ -129,6 +141,7 @@ def register_supplier(user_in: schemas.UserCreate, db: Session = Depends(get_db)
     db.refresh(db_user)
 
     return db_user
+
 
 # ---------- Admin-only create user (can set role/admin) ----------
 
@@ -168,7 +181,9 @@ def admin_create_user(
         age_range=payload.age_range,
         industry=payload.industry,
         household_size=payload.household_size,
-        role=payload.role.value if isinstance(payload.role, RoleEnum) else payload.role,
+        role=payload.role.value
+        if isinstance(payload.role, RoleEnum)
+        else payload.role,
         user_type=(
             payload.user_type.value
             if isinstance(payload.user_type, UserTypeEnum)

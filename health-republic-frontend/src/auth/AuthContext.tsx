@@ -10,13 +10,13 @@ import { useNavigate } from "react-router-dom";
 import { login as apiLogin, fetchMe } from "../api/client";
 import type { LoginResponse, MeResponse } from "../api/client";
 
-
 interface AuthContextValue {
   user: MeResponse["user"] | null;
   accessToken: string | null;
   isLoadingProfile: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  collective: MeResponse["collective"] | null;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -25,6 +25,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MeResponse["user"] | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState<boolean>(true);
+  const [collective, setCollective] = useState<MeResponse["collective"] | null>(
+    null
+  );
 
   const navigate = useNavigate();
 
@@ -41,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchMe(storedAccess)
       .then((me) => {
         setUser(me.user);
+        setCollective(me.collective ?? null);
       })
       .catch((err) => {
         console.error("Failed to fetch profile on startup:", err);
@@ -49,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("refresh_token");
         setAccessToken(null);
         setUser(null);
+        setCollective(null);
       })
       .finally(() => {
         setIsLoadingProfile(false);
@@ -68,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await fetchMe(tokens.access_token);
       setUser(me.user);
+      setCollective(me.collective ?? null);
       navigate("/dashboard", { replace: true });
     } catch (err) {
       console.error("Failed to fetch profile after login:", err);
@@ -76,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem("refresh_token");
       setAccessToken(null);
       setUser(null);
+      setCollective(null);
       throw err;
     } finally {
       setIsLoadingProfile(false);
@@ -87,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("refresh_token");
     setAccessToken(null);
     setUser(null);
+    setCollective(null);
     navigate("/login", { replace: true });
   };
 
@@ -96,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoadingProfile,
     login,
     logout,
+    collective,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

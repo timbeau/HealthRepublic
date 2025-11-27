@@ -9,20 +9,19 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..users import models as user_models
 from ..auth.deps import get_current_user, require_roles
+from ..collectives import models as collective_models
 from . import models, schemas
 from .strategy import evaluate_offer_against_target
-from ..auth.deps import get_current_user  # 👈 add this
-from ..users import models as user_models   # 👈 add this
 
 # NOTE:
 # main.py already includes this router with prefix="/negotiations"
-# so we do NOT set a prefix here to avoid /negotiations/negotiations.
 router = APIRouter(tags=["negotiations"])
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _normalize_mlr(raw_mlr: float | None) -> float | None:
     """Allow MLR to be passed as 0–1 or 0–100."""
@@ -46,6 +45,7 @@ def _get_negotiation_or_404(db: Session, negotiation_id: int) -> models.Negotiat
 # ---------------------------------------------------------------------------
 # Core negotiation CRUD
 # ---------------------------------------------------------------------------
+
 
 @router.post("/start", response_model=schemas.NegotiationOut)
 def start_negotiation(
@@ -77,19 +77,62 @@ def start_negotiation(
     db.refresh(negotiation)
     return negotiation
 
+
 @router.get("/", response_model=List[schemas.NegotiationOut])
 def list_negotiations(
-    current_user: user_models.User = Depends(
-        require_roles("member", "supplier", "admin")
-    ),
+    current_user: user_models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    List negotiations visible to any authenticated user in roles:
-    member, supplier, or admin.
-    (For now we return all; later we can filter by user.)
+    List negotiations for roles:
+      - member
+      - supplier
+      - admin
+
+    This is a general endpoint; the member dashboard should use /negotiations/my.
     """
+    role = (current_user.role or "").lower()
+    if role not in {"member", "supplier", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions",
+        )
+
     negotiations = db.query(models.Negotiation).order_by(models.Negotiation.id).all()
+    return negotiations
+
+
+@router.get("/my", response_model=List[schemas.NegotiationOut])
+def list_my_negotiations(
+    db: Session = Depends(get_db),
+    current_user: user_models.User = Depends(require_roles("member", "admin")),
+):
+    """
+    Return negotiations relevant to the current member/admin.
+
+    Rules:
+    - If the user is not in any collective -> 403 Insufficient permissions
+    - If in a collective -> negotiations for that collective
+    """
+    membership = (
+        db.query(collective_models.CollectiveMembership)
+        .filter(collective_models.CollectiveMembership.user_id == current_user.id)
+        .first()
+    )
+
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions",
+        )
+
+    negotiations = (
+        db.query(models.Negotiation)
+        .filter(models.Negotiation.collective_id == membership.collective_id)
+        .order_by(models.Negotiation.id)
+        .all()
+    )
+
     return negotiations
 
 
@@ -102,41 +145,16 @@ def get_negotiation(
     """
     Get a single negotiation.
 
-    Any authenticated user can view. You can tighten this later
-    (e.g., only members of that collective or supplier).
+    Any authenticated user can view. You can tighten this later.
     """
     negotiation = _get_negotiation_or_404(db, negotiation_id)
     return negotiation
-
-@router.get("/my", response_model=List[schemas.NegotiationOut])
-def list_my_negotiations(
-    db: Session = Depends(get_db),
-    current_user: user_models.User = Depends(require_roles("member", "admin")),
-):
-    """
-    Return negotiations relevant to the current member.
-    For now: return ALL negotiations (you can later filter by collective_id or user_id).
-    """
-
-    # TODO: once you have a direct mapping user -> collective, filter here, e.g.:
-    # negotiations = (
-    #     db.query(models.Negotiation)
-    #       .filter(models.Negotiation.collective_id == current_user.collective_id)
-    #       .order_by(models.Negotiation.id)
-    #       .all()
-    # )
-    negotiations = (
-        db.query(models.Negotiation)
-        .order_by(models.Negotiation.id)
-        .all()
-    )
-
-    return negotiations
 
 
 # ---------------------------------------------------------------------------
 # Offers: supplier & collective
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/{negotiation_id}/supplier-offer",
@@ -166,7 +184,6 @@ def supplier_offer(
 
     mlr = _normalize_mlr(offer.proposed_mlr)
 
-    # Determine round number
     next_round_number = (len(negotiation.rounds) if negotiation.rounds else 0) + 1
 
     round_obj = models.NegotiationRound(
@@ -180,14 +197,12 @@ def supplier_offer(
     )
     db.add(round_obj)
 
-    # Evaluate offer vs target using strategy engine
     evaluation = evaluate_offer_against_target(
         target_pmpm=negotiation.target_pmpm,
         offer_pmpm=offer.proposed_pmpm,
         risk_appetite=negotiation.risk_appetite,
     )
 
-    # If client explicitly flags accept AND evaluation says it's acceptable, close the deal
     if offer.accept and evaluation.is_acceptable:
         negotiation.status = "agreed"
         negotiation.final_agreed_pmpm = offer.proposed_pmpm
@@ -280,6 +295,7 @@ def collective_counter(
 # ---------------------------------------------------------------------------
 # Explicit accept endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/{negotiation_id}/accept",

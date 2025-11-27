@@ -29,3 +29,6 @@ def get_db():
         yield db
     finally:
         db.close()
+# Ensure all models are registered with SQLAlchemy
+from src.users import models as user_models
+from src.collectives import models as collective_models

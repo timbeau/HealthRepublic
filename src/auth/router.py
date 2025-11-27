@@ -1,6 +1,7 @@
 # src/auth/router.py
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -16,7 +17,7 @@ from .utils import (
 from .deps import get_current_user
 
 # NOTE: no prefix here; main.py already does prefix="/auth"
-router = APIRouter(tags=["auth"])
+router = APIRouter()
 
 
 @router.post("/login", response_model=schemas.TokenPair)

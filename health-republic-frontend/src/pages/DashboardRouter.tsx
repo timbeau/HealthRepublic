@@ -5,60 +5,52 @@ import { useAuth } from "../auth/AuthContext";
 import MemberDashboard from "./MemberDashboard";
 import SupplierDashboard from "./SupplierDashboard";
 import AdminDashboard from "./AdminDashboard";
-import type { MeResponse } from "../api/client";
+import CollectivesAdminPage from "./CollectivesAdminPage";
+import AdminUsersPage from "./AdminUsersPage";
 
 export default function DashboardRouter() {
   const { user, isLoadingProfile } = useAuth();
 
-  // Still loading the profile from /dashboard/me
   if (isLoadingProfile) {
-    return <div className="p-6">Loading profile...</div>;
+    return <div className="p-6 text-sm text-slate-500">Loading profile…</div>;
   }
 
-  // Not logged in → go to login
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  // Build a MeResponse-shaped object for SupplierDashboard,
-  // which still expects `me: MeResponse` as a prop.
-  const me: MeResponse = {
-    user: {
-      id: user.id,
-      email: user.email,
-      full_name: user.full_name,
-      role: user.role,
-    },
-    sections: {
-      headline: `Welcome back, ${user.full_name || user.email}`,
-      role: user.role,
-    },
-  };
-
   const role = user.role;
 
+  if (role === "admin") {
+    return (
+      <Routes>
+        {/* /app */}
+        <Route path="" element={<AdminDashboard />} />
+        {/* /app/admin/users */}
+        <Route path="admin/users" element={<AdminUsersPage />} />
+        {/* /app/admin/collectives */}
+        <Route path="admin/collectives" element={<CollectivesAdminPage />} />
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/app" replace />} />
+        <Route path="admin/users" element={<AdminUsersPage />} />
+      </Routes>
+    );
+  }
+
+  if (role === "supplier") {
+    return (
+      <Routes>
+        <Route path="" element={<SupplierDashboard />} />
+        <Route path="*" element={<Navigate to="/app" replace />} />
+      </Routes>
+    );
+  }
+
+  // Default: member
   return (
     <Routes>
-      {/* Member routes */}
-      {role === "member" && (
-        <Route path="*" element={<MemberDashboard />} />
-      )}
-
-      {/* Supplier routes */}
-      {role === "supplier" && (
-        <Route path="*" element={<SupplierDashboard me={me} />} />
-      )}
-
-      {/* Admin routes */}
-      {role === "admin" && (
-        <Route path="*" element={<AdminDashboard />} />
-      )}
-
-      {/* Fallback for unexpected roles */}
-      <Route
-        path="*"
-        element={<div className="p-6">Unknown role: {role}</div>}
-      />
+      <Route path="" element={<MemberDashboard />} />
+      <Route path="*" element={<Navigate to="/app" replace />} />
     </Routes>
   );
 }

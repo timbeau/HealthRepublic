@@ -1,69 +1,101 @@
 # src/auth/deps.py
 
+from typing import Optional, Set
+
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-from ..database import get_db
-from ..users import models as user_models
+from .security import oauth2_scheme
 from .utils import decode_access_token
+from ..database import get_db
+from ..users.models import User
 
-# This should match your actual login endpoint path:
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+# ----------------------------------------------------------------------------
+# Core helpers
+# ----------------------------------------------------------------------------
+
+def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+    return db.query(User).filter(User.id == user_id).first()
 
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
-) -> user_models.User:
+) -> User:
     """
-    Extract current user from Bearer token.
+    Decode the JWT access token and return the associated User.
+
+    Uses auth.utils.decode_access_token(), which already knows how to:
+      - Verify signature & expiry using settings.SECRET_KEY and HS256.
+      - Raise ValueError on invalid/expired tokens.
+
+    Expects:
+      - payload["sub"] = user id (as string).
     """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
     try:
         payload = decode_access_token(token)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
+        # Invalid or expired
+        raise credentials_exception
 
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        )
+    subject = payload.get("sub")
+    if subject is None:
+        raise credentials_exception
 
     try:
-        user_id_int = int(user_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user id in token",
-        )
+        user_id = int(subject)
+    except (TypeError, ValueError):
+        # sub is not an int – token doesn't match expected format
+        raise credentials_exception
 
-    user = (
-        db.query(user_models.User)
-        .filter(user_models.User.id == user_id_int)
-        .first()
-    )
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
+    user = get_user_by_id(db, user_id=user_id)
+    if user is None:
+        raise credentials_exception
 
     return user
 
 
+# ----------------------------------------------------------------------------
+# Role-based access helpers
+# ----------------------------------------------------------------------------
+
+def _normalize_roles(roles: Optional[Set[str]]) -> Set[str]:
+    if not roles:
+        return set()
+    return {r.lower() for r in roles}
+
+
 def require_roles(*allowed_roles: str):
     """
-    Dependency factory to enforce role-based access.
-    Example:
-        current_user: User = Depends(require_roles("member", "admin"))
+    Dependency factory that ensures the current user has one of the allowed roles.
+    Comparison is case-insensitive.
+
+    Usage:
+
+        @router.get("/admin-only")
+        def admin_only(
+            current_admin: User = Depends(require_roles("admin")),
+        ):
+            ...
+
+        @router.get("/member-or-admin")
+        def member_or_admin(
+            current_user: User = Depends(require_roles("member", "admin")),
+        ):
+            ...
     """
-    def dependency(current_user: user_models.User = Depends(get_current_user)):
-        if current_user.role not in allowed_roles:
+    allowed_normalized = _normalize_roles(set(allowed_roles))
+
+    def dependency(current_user: User = Depends(get_current_user)) -> User:
+        user_role = (current_user.role or "").lower()
+        if user_role not in allowed_normalized:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",

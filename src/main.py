@@ -10,6 +10,7 @@ from .collectives.router import router as collectives_router
 from .surveys.router import router as surveys_router
 from .negotiations.router import router as negotiations_router
 from .suppliers.router import router as suppliers_router
+from .users.router_admin import router as admin_users_router
 
 # --- Optional routers (won't crash if missing) ---
 try:
@@ -75,12 +76,13 @@ app.add_middleware(
 )
 
 # Core routers
-app.include_router(auth_router, tags=["auth"])
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(users_router, tags=["users"])
 app.include_router(collectives_router, prefix="/collectives", tags=["collectives"])
 app.include_router(surveys_router, prefix="/surveys", tags=["surveys"])
 app.include_router(negotiations_router, prefix="/negotiations", tags=["negotiations"])
 app.include_router(suppliers_router, prefix="/suppliers", tags=["suppliers"])
+app.include_router(admin_users_router)
 
 # Optional routers (only mount if import succeeded)
 if bundles_router:

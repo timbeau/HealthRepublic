@@ -18,11 +18,33 @@ router = APIRouter()
 # BASIC DASHBOARDS
 # --------------------------------------------------------
 
+
 @router.get("/me", summary="Generic dashboard for the logged-in user")
 def my_dashboard(
     current_user: user_models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Find the first collective this user belongs to (if any)
+    membership = (
+        db.query(collective_models.CollectiveMembership)
+        .filter(collective_models.CollectiveMembership.user_id == current_user.id)
+        .first()
+    )
+
+    collective_data = None
+    if membership:
+        collective = (
+            db.query(collective_models.Collective)
+            .filter(collective_models.Collective.id == membership.collective_id)
+            .first()
+        )
+        if collective:
+            collective_data = {
+                "id": collective.id,
+                "name": collective.name,
+                "category": getattr(collective, "category", None),
+            }
+
     return {
         "user": {
             "id": current_user.id,
@@ -34,6 +56,8 @@ def my_dashboard(
             "headline": f"Welcome back, {current_user.full_name or current_user.email}",
             "role": current_user.role,
         },
+        # NEW: expose the user's collective (or null if none)
+        "collective": collective_data,
     }
 
 
@@ -78,9 +102,11 @@ def admin_dashboard(
         "user_id": current_user.id,
     }
 
+
 # --------------------------------------------------------
 # REAL SUPPLIER PORTAL DASHBOARD
 # --------------------------------------------------------
+
 
 class SupplierNegotiationSummary(BaseModel):
     id: int
@@ -176,9 +202,11 @@ def supplier_negotiation_dashboard(
         closed_negotiations=closed_items,
     )
 
+
 # --------------------------------------------------------
 # PUBLIC OVERVIEW FOR SPLASH PAGE
 # --------------------------------------------------------
+
 
 class CollectiveSummary(BaseModel):
     id: int
